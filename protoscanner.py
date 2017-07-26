@@ -10,7 +10,7 @@ import time
 import netaddr
 import threading
 from socket import *
-from dicom import *
+from pydicom import *
 from pynetdicom3 import AE
 
 def dicomscan(server, port, results_file):
