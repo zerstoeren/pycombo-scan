@@ -9,9 +9,209 @@ import json
 import time
 import netaddr
 import threading
+import ldap
+import ldap.async
 from socket import *
 from pydicom import *
 from pynetdicom3 import AE
+from rdpy.protocol.rdp import rdp
+from rdpy.protocol.rfb import rfb
+from twisted.internet import reactor
+
+class MyRFBFactory(rfb.ClientFactory):
+
+    def clientConnectionLost(self, connector, reason):
+        print "VNC Connection Lost: Reason: " + '%s%' % reason
+        reactor.stop()
+        pass
+
+    def clientConnectionFailed(self, connector, reason):
+        print "VNC Connections Failed: Reason: " + '%s' % reason
+        reactor.stop()
+        pass
+
+    def buildObserver(self, controller, addr):
+        class MyObserver(rfb.RFBClientObserver):
+
+            def onReady(self):
+                """
+                @summary: Event when network stack is ready to receive or send event
+                """
+
+            def onUpdate(self, width, height, x, y, pixelFormat, encoding, data):
+                """
+                @summary: Implement RFBClientObserver interface
+                @param width: width of new image
+                @param height: height of new image
+                @param x: x position of new image
+                @param y: y position of new image
+                @param pixelFormat: pixefFormat structure in rfb.message.PixelFormat
+                @param encoding: encoding type rfb.message.Encoding
+                @param data: image data in accordance with pixel format and encoding
+                """
+
+            def onCutText(self, text):
+                """
+                @summary: event when server send cut text event
+                @param text: text received
+                """
+
+            def onBell(self):
+                """
+                @summary: event when server send biiip
+                """
+
+            def onClose(self):
+                """
+                @summary: Call when stack is close
+                """
+
+        return MyObserver(controller)
+
+class MyRDPFactory(rdp.ClientFactory):
+
+    def clientConnectionLost(self, connector, reason):
+        print "RDP Connection Lost: Reason: " + '%s' % reason
+        reactor.stop()
+        pass
+
+    def clientConnectionFailed(self, connector, reason):
+        print "RDP Connection Failes: Reason: " + '%s' % reason
+        reactor.stop()
+        pass
+
+    def buildObserver(self, controller, addr):
+
+        class MyObserver(rdp.RDPClientObserver):
+
+            def onReady(self):
+                """
+                @summary: Call when stack is ready
+                """
+                #send 'r' key
+                self._controller.sendKeyEventUnicode(ord(unicode("r".toUtf8(), encoding="UTF-8")), True)
+                #mouse move and click at pixel 200x200
+                self._controller.sendPointerEvent(200, 200, 1, true)
+
+            def onUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data):
+                """
+                @summary: Notify bitmap update
+                @param destLeft: xmin position
+                @param destTop: ymin position
+                @param destRight: xmax position because RDP can send bitmap with padding
+                @param destBottom: ymax position because RDP can send bitmap with padding
+                @param width: width of bitmap
+                @param height: height of bitmap
+                @param bitsPerPixel: number of bit per pixel
+                @param isCompress: use RLE compression
+                @param data: bitmap data
+                """
+
+            def onSessionReady(self):
+                        """
+                        @summary: Windows session is ready
+                        """
+
+            def onClose(self):
+                """
+                @summary: Call when stack is close
+                """
+
+        return MyObserver(controller)
+
+def rdpscan(server, port, proto, results_file):
+    ts = time.time()
+    try:
+        if proto == 'RDP':
+            print "Attempting RDP scan on " + '%s' % server + '\n'
+            rdpshot = reactor.connectTCP(server, port, MyRDPFactory())
+            rdpshot = reactor.run()
+        else:
+            print "Attempting VNC scan on " + '%s' % server + '\n'
+            rdpshot = reactor.connectTCP(server, port, MyRFBFactory())
+            rdpshot = reactor.run()
+        if results_file is not None:
+            with print_lock:
+                with open(rdpargs.results_file, 'a+') as screenshot:
+                    screenshot.write('%s' % rdpshot)
+        else:
+            print server + ': ' + '%s' % rdpshot + '\n'
+            pass
+    except:
+        try:
+            connector = socket(AF_INET, SOCK_STREAM)
+            connector.settimeout(1)
+            connector.connect(('%s' % server, port))
+            connector.send('Friendly Portscanner\r\n')
+            rdp_entry = connector.recv(2048)
+            connector.close()
+            if results_file is not None:
+                with print_lock:
+                    with open(results_file, 'a+') as outfile:
+                       rdp_data = 'host: ' + '%s' % server + '\n' + 'is_rdp: false\nrdp_info:' + '%s' % rdp_entry + '\nrdp_port: ' + '%s' % port + '\ntimestamp: ' + '%s' % ts + '\n\n'
+                       outfile.write(rdp_data)
+            else:
+                with print_lock:
+                    print ("[-] " + '%s' % server + ": " + '%s' % rdp_entry + '\n')
+                    pass
+        except Exception, errorcode:
+            if errorcode[0] == "timed out":
+                print server + ": connection " + errorcode[0] + "\n"
+                pass
+            elif errorcode[0] == "connection refused":
+                print server + ": connection " + errorcode[0] + "\n"
+                pass
+            else:
+                pass
+
+def ldapscan(server, port, proto):
+    print "Attempting LDAP scan on " + '%s' % server + '\n'
+    ts = time.time()
+    ldap_srv = ldap.async.LDIFWriter(
+    ldap.initialize(proto + "://" + server + ":" + str(port)),
+    sys.stdout
+)
+    ldap_srv.startSearch(
+      'dc=*,dc=*',
+      ldap.SCOPE_SUBTREE,
+      '(objectClass=*)',
+)
+    try:
+        partial = ldap_srv.processResults()
+    except Exception, errorcode:
+        if errorcode[0] == 'ldap.NO_SUCH_OBJECT':
+            print(server + ": " + errorcode[0] + "\n")
+# move the code below to the proper location in the code... duh  lol
+#       elif errorcode[0] == 'ldap.SERVER_DOWN':
+#            try:
+#                connector = socket(AF_INET. SOCK_STREAM)
+#                connector.settimeout(1)
+#                connector.connect(('%s' % server, port))
+#                connector.send('Friendly Portscanner\r\n')
+#                ldap_srv = connector.recv(2048)
+#                connector.close()
+#                print("[-] " + '%s' % server + ": " + '%s' % ldap_srv + '\n')
+#            except Exception, errocode:
+#                if errorcode[0] == "timed out":
+#                    print(server + ": connection " + errorcode[0] + "\n")
+#                    pass
+#                elif errorcode[0] == "connection refused":
+#                    print(server + ": connection " + errorcode[0] + "\n")
+#                    pass
+#                else:
+#                    pass
+        else:
+            pass
+    except ldap.SIZELIMIT_EXCEEDED:
+        print('Warning: Server-side size limit exceeded.\n')
+    else:
+        if partial:
+            print('Warning: Only partial results received.\n')
+
+    print('[+] ' + server + ', is_ldap: True, LDAP Objects Received: %d \n' % (
+      ldap_srv.endResultBreak-ldap_srv.beginResultsDropped
+  )
+)
 
 def dicomscan(server, port, results_file):
     print "Attempting DICOM scan on " + '%s' % server + '\n'
@@ -116,8 +316,13 @@ def thread_check(server, results_file):
     try:
         if smbargs.proto == 'SMB':
             smbscan(server, results_file)
-        else:
+        elif smbargs.proto == 'DICOM':
             dicomscan(server, port, results_file)
+        elif smbargs.proto == 'LDAP':
+            ldapscan(server, smbargs.port, smbargs.proto) 
+        else:
+            rdpscan(server, smbargs.port, smbargs.proto, results_file)
+            
     except Exception as e:
         with print_lock:
            print "I ended up here \n"
@@ -126,10 +331,10 @@ def thread_check(server, results_file):
         semaphore.release()
 
 if __name__ == "__main__":    
-    smbparser = argparse.ArgumentParser(description="SMB Scanner")
+    smbparser = argparse.ArgumentParser(description="Multi Protocol Scanner")
     smbparser.add_argument("-netrange", type=str, required=False, help="CIDR Block")
     smbparser.add_argument("-ip", type=str, required=False, help="IP address to scan")
-    smbparser.add_argument("-proto", type=str, required=True, help="DICOM or SMB")
+    smbparser.add_argument("-proto", type=str, required=True, help="DICOM, SMB, RDP, VNC")
     smbparser.add_argument("-port", type=int, required=False, help="Only required when not running SMB")
     smbparser.add_argument("-results_file", type=str, required=False, help="Results File")
     smbparser.add_argument("-packet_rate", default=1, type=int, required=False, help="Packet rate")
@@ -141,16 +346,26 @@ if __name__ == "__main__":
     if smbargs.ip is not None:
         if smbargs.proto == 'SMB':
             smbscan(smbargs.ip, smbargs.results_file)
-        else:
+        elif smbargs.proto == 'DICOM':
             dicomscan(smbargs.ip, smbargs.port, smbargs.results_file)
+        elif smbargs.proto == 'LDAP':
+            ldapscan(smbargs.ip, smbargs.port, smbargs.proto)
+        else:
+            rdpscan(smbargs.ip, smbargs.port, smbargs.proto, smbargs.results_file)
 
     elif smbargs.netrange is not None:
        if smbargs.proto == 'SMB':
            for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
                smbscan(str(ip), smbargs.results_file)
+       elif smbargs.proto == 'DICOM':
+           for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
+               dicomscan(str(ip), smbargs.port, smbargs.results_file)
+       elif smbargs.proto == 'LDAP':
+           for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
+               ldapscan(str(ip), smbargs.port, smbargs.proto)
        else:
            for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
-               dicomscan(str(ip), smbargs.port, smbargs.results_file) 
+               rdpscan(str(ip), smbargs.port, smbargs.proto, smbargs.results_file) 
 
     elif not smbargs.packet_rate and smbargs.netrange:
        for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
