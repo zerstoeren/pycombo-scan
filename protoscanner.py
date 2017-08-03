@@ -9,6 +9,8 @@ import json
 import time
 import netaddr
 import threading
+import ldap
+import ldap.async
 from socket import *
 from pydicom import *
 from pynetdicom3 import AE
@@ -162,6 +164,55 @@ def rdpscan(server, port, proto, results_file):
             else:
                 pass
 
+def ldapscan(server, port, proto):
+    print "Attempting LDAP scan on " + '%s' % server + '\n'
+    ts = time.time()
+    ldap_srv = ldap.async.LDIFWriter(
+    ldap.initialize(proto + "://" + server + ":" + str(port)),
+    sys.stdout
+)
+    ldap_srv.startSearch(
+      'dc=*,dc=*',
+      ldap.SCOPE_SUBTREE,
+      '(objectClass=*)',
+)
+    try:
+        partial = ldap_srv.processResults()
+    except Exception, errorcode:
+        if errorcode[0] == 'ldap.NO_SUCH_OBJECT':
+            print(server + ": " + errorcode[0] + "\n")
+# move the code below to the proper location in the code... duh  lol
+#       elif errorcode[0] == 'ldap.SERVER_DOWN':
+#            try:
+#                connector = socket(AF_INET. SOCK_STREAM)
+#                connector.settimeout(1)
+#                connector.connect(('%s' % server, port))
+#                connector.send('Friendly Portscanner\r\n')
+#                ldap_srv = connector.recv(2048)
+#                connector.close()
+#                print("[-] " + '%s' % server + ": " + '%s' % ldap_srv + '\n')
+#            except Exception, errocode:
+#                if errorcode[0] == "timed out":
+#                    print(server + ": connection " + errorcode[0] + "\n")
+#                    pass
+#                elif errorcode[0] == "connection refused":
+#                    print(server + ": connection " + errorcode[0] + "\n")
+#                    pass
+#                else:
+#                    pass
+        else:
+            pass
+    except ldap.SIZELIMIT_EXCEEDED:
+        print('Warning: Server-side size limit exceeded.\n')
+    else:
+        if partial:
+            print('Warning: Only partial results received.\n')
+
+    print('[+] ' + server + ', is_ldap: True, LDAP Objects Received: %d \n' % (
+      ldap_srv.endResultBreak-ldap_srv.beginResultsDropped
+  )
+)
+
 def dicomscan(server, port, results_file):
     print "Attempting DICOM scan on " + '%s' % server + '\n'
     ts = time.time()
@@ -267,6 +318,8 @@ def thread_check(server, results_file):
             smbscan(server, results_file)
         elif smbargs.proto == 'DICOM':
             dicomscan(server, port, results_file)
+        elif smbargs.proto == 'LDAP':
+            ldapscan(server, smbargs.port, smbargs.proto) 
         else:
             rdpscan(server, smbargs.port, smbargs.proto, results_file)
             
@@ -295,6 +348,8 @@ if __name__ == "__main__":
             smbscan(smbargs.ip, smbargs.results_file)
         elif smbargs.proto == 'DICOM':
             dicomscan(smbargs.ip, smbargs.port, smbargs.results_file)
+        elif smbargs.proto == 'LDAP':
+            ldapscan(smbargs.ip, smbargs.port, smbargs.proto)
         else:
             rdpscan(smbargs.ip, smbargs.port, smbargs.proto, smbargs.results_file)
 
@@ -305,6 +360,9 @@ if __name__ == "__main__":
        elif smbargs.proto == 'DICOM':
            for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
                dicomscan(str(ip), smbargs.port, smbargs.results_file)
+       elif smbargs.proto == 'LDAP':
+           for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
+               ldapscan(str(ip), smbargs.port, smbargs.proto)
        else:
            for ip in netaddr.IPNetwork(smbargs.netrange).iter_hosts():
                rdpscan(str(ip), smbargs.port, smbargs.proto, smbargs.results_file) 
