@@ -123,12 +123,10 @@ def rdpscan(server, port, proto, results_file):
         if proto == 'RDP':
             print "Attempting RDP scan on " + '%s' % server + '\n'
             rdpshot = reactor.connectTCP(server, port, MyRDPFactory())
-            reactor.timeout(10)
             rdpshot = reactor.run()
         else:
             print "Attempting VNC scan on " + '%s' % server + '\n'
             rdpshot = reactor.connectTCP(server, port, MyRFBFactory())
-#           rdpshote.timeout(10)
             rdpshot = reactor.run()
         if results_file is not None:
             with print_lock:
